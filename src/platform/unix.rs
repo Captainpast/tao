@@ -80,7 +80,7 @@ pub trait WindowBuilderExtUnix {
   fn with_skip_taskbar(self, skip: bool) -> WindowBuilder;
   /// Set this window as a transient dialog for `parent`
   /// <https://gtk-rs.org/gtk3-rs/stable/latest/docs/gdk/struct.Window.html#method.set_transient_for>
-  fn with_transient_for(self, parent: &impl gtk::glib::IsA<gtk::Window>) -> WindowBuilder;
+  fn with_transient_for(self, parent: &impl gtk::prelude::IsA<gtk::Window>) -> WindowBuilder;
 
   /// Whether to enable or disable the internal draw for transparent window.
   ///
@@ -124,8 +124,8 @@ impl WindowBuilderExtUnix for WindowBuilder {
     self
   }
 
-  fn with_transient_for(mut self, parent: &impl gtk::glib::IsA<gtk::Window>) -> WindowBuilder {
-    use gtk::glib::Cast;
+  fn with_transient_for(mut self, parent: &impl gtk::prelude::IsA<gtk::Window>) -> WindowBuilder {
+    use gtk::prelude::Cast;
     self.platform_specific.parent = Parent::ChildOf(parent.clone().upcast());
     self
   }

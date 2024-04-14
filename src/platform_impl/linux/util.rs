@@ -3,7 +3,7 @@ use gtk::gdk::{
   prelude::{DeviceExt, SeatExt},
   Display,
 };
-use gtk::traits::{GtkWindowExt, WidgetExt};
+use gtk::prelude::{GtkWindowExt, WidgetExt};
 
 use crate::{
   dpi::{LogicalPosition, LogicalSize, PhysicalPosition},

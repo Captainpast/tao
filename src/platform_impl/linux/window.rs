@@ -12,10 +12,7 @@ use std::{
   },
 };
 
-use gtk::{
-  gdk::WindowState,
-  glib::{self, translate::ToGlibPtr},
-};
+use gtk::glib::{self, translate::ToGlibPtr};
 use gtk::{prelude::*, Settings};
 
 use crate::{
@@ -80,7 +77,7 @@ impl Window {
 
     let mut window_builder = gtk::ApplicationWindow::builder()
       .application(app)
-      .accept_focus(attributes.focused);
+      .can_focus(attributes.focused);
     if let Parent::ChildOf(parent) = pl_attribs.parent {
       window_builder = window_builder.transient_for(&parent);
     }
@@ -100,7 +97,7 @@ impl Window {
       .map(|size| size.to_logical::<f64>(win_scale_factor as f64).into())
       .unwrap_or((800, 600));
     window.set_default_size(1, 1);
-    window.resize(width, height);
+    window.set_size_request(width, height);
 
     if attributes.maximized {
       window.maximize();
@@ -128,10 +125,8 @@ impl Window {
     }
 
     if pl_attribs.app_paintable || attributes.transparent {
-      // Set a few attributes to make the window can be painted.
-      // See Gtk drawing model for more info:
-      // https://docs.gtk.org/gtk3/drawing-model.html
-      window.set_app_paintable(true);
+      // use css instead: https://docs.gtk.org/gtk4/migrating-3to4.html#stop-using-gtk_widget_set_app_paintable
+      window.set_app_paintable(true); 
     }
 
     if !pl_attribs.double_buffered {
@@ -145,7 +140,7 @@ impl Window {
 
     let default_vbox = if pl_attribs.default_vbox {
       let box_ = gtk::Box::new(gtk::Orientation::Vertical, 0);
-      window.add(&box_);
+      window.set_child(Some(&box_));
       Some(box_)
     } else {
       None
@@ -155,9 +150,9 @@ impl Window {
     window.set_title(&attributes.title);
     if let Some(Fullscreen::Borderless(m)) = &attributes.fullscreen {
       if let Some(monitor) = m {
-        let display = window.display();
+        let display = gtk::prelude::WidgetExt::display(&window);
         let monitor = &monitor.inner;
-        let monitors = display.n_monitors();
+        let monitors = display.monitors().n_items();
         for i in 0..monitors {
           let m = display.monitor(i).unwrap();
           if m == monitor.monitor {
@@ -171,6 +166,11 @@ impl Window {
     }
     window.set_visible(attributes.visible);
     window.set_decorated(attributes.decorations);
+    // if (attributes.decorations) {
+    //   let controls = gtk::WindowControls::builder()
+    //     .side(gtk::PackType::End)
+    //     .build(); 
+    // }
 
     if attributes.always_on_bottom {
       window.set_keep_below(attributes.always_on_bottom);
@@ -237,8 +237,9 @@ impl Window {
     let position: Rc<(AtomicI32, AtomicI32)> = Rc::new((w_pos.0.into(), w_pos.1.into()));
     let position_clone = position.clone();
 
-    let w_size = window.size();
-    let size: Rc<(AtomicI32, AtomicI32)> = Rc::new((w_size.0.into(), w_size.1.into()));
+    let w_width = window.width();
+    let w_height = window.height();
+    let size: Rc<(AtomicI32, AtomicI32)> = Rc::new((w_width.into(), w_height.into()));
     let size_clone = size.clone();
 
     window.connect_configure_event(move |_, event| {
@@ -685,14 +686,10 @@ impl Window {
   }
 
   pub fn current_monitor(&self) -> Option<RootMonitorHandle> {
-    let display = self.window.display();
+    let display = gtk::prelude::WidgetExt::display(&self.window);
     // `.window()` returns `None` if the window is invisible;
     // we fallback to the primary monitor
-    let monitor = self
-      .window
-      .window()
-      .and_then(|window| display.monitor_at_window(&window))
-      .or_else(|| display.primary_monitor());
+    let monitor = display.monitor_at_window(&self.window);
 
     monitor.map(|monitor| RootMonitorHandle {
       inner: MonitorHandle { monitor },
@@ -702,11 +699,11 @@ impl Window {
   #[inline]
   pub fn available_monitors(&self) -> VecDeque<MonitorHandle> {
     let mut handles = VecDeque::new();
-    let display = self.window.display();
-    let numbers = display.n_monitors();
+    let display = gtk::prelude::WidgetExt::display(&self.window);
+    let numbers = display.monitors().n_items();
 
     for i in 0..numbers {
-      let monitor = MonitorHandle::new(&display, i);
+      let monitor = MonitorHandle::new(&display, i.try_into().unwrap());
       handles.push_back(monitor);
     }
 
@@ -714,7 +711,7 @@ impl Window {
   }
 
   pub fn primary_monitor(&self) -> Option<RootMonitorHandle> {
-    let display = self.window.display();
+    let display = gtk::prelude::WidgetExt::display(&self.window);
     display.primary_monitor().map(|monitor| {
       let handle = MonitorHandle { monitor };
       RootMonitorHandle { inner: handle }
@@ -723,12 +720,12 @@ impl Window {
 
   #[inline]
   pub fn monitor_from_point(&self, x: f64, y: f64) -> Option<RootMonitorHandle> {
-    let display = &self.window.display();
-    monitor::from_point(display, x, y).map(|inner| RootMonitorHandle { inner })
+    let display = gtk::prelude::WidgetExt::display(&self.window);
+    monitor::from_point(&display, x, y).map(|inner| RootMonitorHandle { inner })
   }
 
   fn is_wayland(&self) -> bool {
-    self.window.display().backend().is_wayland()
+    gtk::prelude::WidgetExt::display(&self.window).backend().is_wayland()
   }
 
   #[cfg(feature = "rwh_04")]
@@ -801,20 +798,16 @@ impl Window {
   #[cfg(feature = "rwh_06")]
   #[inline]
   pub fn raw_window_handle_rwh_06(&self) -> Result<rwh_06::RawWindowHandle, rwh_06::HandleError> {
-    if let Some(window) = self.window.window() {
-      if self.is_wayland() {
-        let surface =
-          unsafe { gdk_wayland_sys::gdk_wayland_window_get_wl_surface(window.as_ptr() as *mut _) };
-        let surface = unsafe { std::ptr::NonNull::new_unchecked(surface) };
-        let window_handle = rwh_06::WaylandWindowHandle::new(surface);
-        Ok(rwh_06::RawWindowHandle::Wayland(window_handle))
-      } else {
-        let xid = unsafe { gdk_x11_sys::gdk_x11_window_get_xid(window.as_ptr() as *mut _) };
-        let window_handle = rwh_06::XlibWindowHandle::new(xid);
-        Ok(rwh_06::RawWindowHandle::Xlib(window_handle))
-      }
+    if self.is_wayland() {
+      let surface =
+        unsafe { gdk_wayland_sys::gdk_wayland_window_get_wl_surface(self.window.as_ptr() as *mut _) };
+      let surface = unsafe { std::ptr::NonNull::new_unchecked(surface) };
+      let window_handle = rwh_06::WaylandWindowHandle::new(surface);
+      Ok(rwh_06::RawWindowHandle::Wayland(window_handle))
     } else {
-      Err(rwh_06::HandleError::Unavailable)
+      let xid = unsafe { gdk_x11_sys::gdk_x11_window_get_xid(self.window.as_ptr() as *mut _) };
+      let window_handle = rwh_06::XlibWindowHandle::new(xid);
+      Ok(rwh_06::RawWindowHandle::Xlib(window_handle))
     }
   }
 
@@ -823,7 +816,7 @@ impl Window {
   pub fn raw_display_handle_rwh_06(&self) -> Result<rwh_06::RawDisplayHandle, rwh_06::HandleError> {
     if self.is_wayland() {
       let display = unsafe {
-        gdk_wayland_sys::gdk_wayland_display_get_wl_display(self.window.display().as_ptr() as *mut _)
+        gdk_wayland_sys::gdk_wayland_display_get_wl_display(gtk::prelude::WidgetExt::display(&self.window).as_ptr() as *mut _)
       };
       let display = unsafe { std::ptr::NonNull::new_unchecked(display) };
       let display_handle = rwh_06::WaylandDisplayHandle::new(display);
